@@ -25,7 +25,7 @@ describe('ReactDOMComponent', () => {
   }
 
   beforeEach(() => {
-    jest.resetModuleRegistry();
+    jest.resetModules();
     React = require('React');
     ReactDOM = require('ReactDOM');
     ReactDOMFeatureFlags = require('ReactDOMFeatureFlags');
@@ -298,6 +298,46 @@ describe('ReactDOMComponent', () => {
       expect(
         container.firstChild.hasAttribute('dangerouslySetInnerHTML')
       ).toBe(false);
+    });
+
+    it('should render null and undefined as empty but print other falsy values', () => {
+      var container = document.createElement('div');
+
+      ReactDOM.render(
+        <div dangerouslySetInnerHTML={{__html: 'textContent'}} />,
+        container
+      );
+      expect(container.textContent).toEqual('textContent');
+
+      ReactDOM.render(
+        <div dangerouslySetInnerHTML={{__html: 0}} />,
+        container
+      );
+      expect(container.textContent).toEqual('0');
+
+      ReactDOM.render(
+        <div dangerouslySetInnerHTML={{__html: false}} />,
+        container
+      );
+      expect(container.textContent).toEqual('false');
+
+      ReactDOM.render(
+        <div dangerouslySetInnerHTML={{__html: ''}} />,
+        container
+      );
+      expect(container.textContent).toEqual('');
+
+      ReactDOM.render(
+        <div dangerouslySetInnerHTML={{__html: null}} />,
+        container
+      );
+      expect(container.textContent).toEqual('');
+
+      ReactDOM.render(
+        <div dangerouslySetInnerHTML={{__html: undefined}} />,
+        container
+      );
+      expect(container.textContent).toEqual('');
     });
 
     it('should remove attributes', () => {
@@ -1212,7 +1252,7 @@ describe('ReactDOMComponent', () => {
     it('should warn about the `onScroll` issue when unsupported (IE8)', () => {
       // Mock this here so we can mimic IE8 support. We require isEventSupported
       // before React so it's pre-mocked before React would require it.
-      jest.resetModuleRegistry()
+      jest.resetModules()
         .mock('isEventSupported');
       var isEventSupported = require('isEventSupported');
       isEventSupported.mockReturnValueOnce(false);

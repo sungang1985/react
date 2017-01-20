@@ -36,6 +36,7 @@ scripts/error-codes/__tests__/invertObject-test.js
 
 src/addons/__tests__/ReactComponentWithPureRenderMixin-test.js
 * provides a default shouldComponentUpdate implementation
+* does not do a deep comparison
 
 src/addons/__tests__/ReactFragment-test.js
 * warns for numeric keys on objects as children
@@ -105,6 +106,7 @@ src/addons/transitions/__tests__/ReactTransitionGroup-test.js
 * should handle enter/leave/enter/leave correctly
 * should handle enter/leave/enter correctly
 * should handle entering/leaving several elements at once
+* should warn for duplicated keys
 
 src/isomorphic/children/__tests__/ReactChildren-test.js
 * should support identity for simple
@@ -155,6 +157,8 @@ src/isomorphic/classic/__tests__/ReactContextValidator-test.js
 * should pass next context to lifecycles
 * should check context types
 * should check child context types
+* should warn (but not error) if getChildContext method is missing
+* should pass parent context if getChildContext method is missing
 
 src/isomorphic/classic/class/__tests__/ReactBind-test.js
 * Holds reference to instance
@@ -286,7 +290,8 @@ src/isomorphic/classic/element/__tests__/ReactElementValidator-test.js
 * does not warn when the element is directly in rest args
 * does not warn when the array contains a non-element
 * should give context for PropType errors in nested components.
-* gives a helpful error when passing null, undefined, boolean, or number
+* gives a helpful error when passing invalid types
+* includes the owner name when passing null, undefined, boolean, or number
 * should check default prop values
 * should not check the default for explicit null
 * should check declared prop types
@@ -541,6 +546,10 @@ src/renderers/dom/fiber/__tests__/ReactDOMFiber-test.js
 * findDOMNode should find dom element after expanding a fragment
 * should bubble events from the portal to the parent
 * should not onMouseLeave when staying in the portal
+* should not update event handlers until commit
+* should not crash encountering low-priority tree
+* throws if non-element passed to top-level render
+* throws if something other than false, null, or an element is returned from render
 
 src/renderers/dom/shared/__tests__/CSSProperty-test.js
 * should generate browser prefixes for its `isUnitlessNumber`
@@ -618,7 +627,10 @@ src/renderers/dom/shared/__tests__/ReactDOM-test.js
 * should overwrite props.children with children argument
 * should purge the DOM cache when removing nodes
 * allow React.DOM factories to be called without warnings
+* throws in render() if the mount callback is not a function
+* throws in render() if the update callback is not a function
 * preserves focus
+* calls focus() on autoFocus elements after they have been mounted to the DOM
 
 src/renderers/dom/shared/__tests__/ReactDOMComponent-test.js
 * should handle className
@@ -635,6 +647,7 @@ src/renderers/dom/shared/__tests__/ReactDOMComponent-test.js
 * should allow named slot projection on both web components and regular DOM elements
 * should skip reserved props on web components
 * should skip dangerouslySetInnerHTML on web components
+* should render null and undefined as empty but print other falsy values
 * should remove attributes
 * should remove properties
 * should properly update custom attributes on custom elements
@@ -726,6 +739,8 @@ src/renderers/dom/shared/__tests__/ReactDOMSVG-test.js
 * creates initial namespaced markup
 * creates elements with SVG namespace inside SVG tag during mount
 * creates elements with SVG namespace inside SVG tag during update
+* can render SVG into a non-React SVG tree
+* can render HTML into a foreignObject in non-React SVG tree
 
 src/renderers/dom/shared/__tests__/ReactDOMTextComponent-test.js
 * updates a mounted text component in place
@@ -746,6 +761,7 @@ src/renderers/dom/shared/__tests__/ReactEventListener-test.js
 * should not fire duplicate events for a React DOM tree
 
 src/renderers/dom/shared/__tests__/ReactMount-test.js
+* throws when given a non-node
 * should render different components in same root
 * should unmount and remount if the key changes
 * should reuse markup if rendering to the same target twice
@@ -944,7 +960,6 @@ src/renderers/dom/shared/wrappers/__tests__/ReactDOMIframe-test.js
 
 src/renderers/dom/shared/wrappers/__tests__/ReactDOMInput-test.js
 * should properly control a value even if no event listener exists
-* should control a value in reentrant events
 * should control values in reentrant events with different targets
 * should display `defaultValue` of number 0
 * only assigns defaultValue if it changes
@@ -1134,7 +1149,9 @@ src/renderers/shared/fiber/__tests__/ReactIncremental-test.js
 * can resume work in a subtree even when a parent bails out
 * can resume work in a bailed subtree within one pass
 * can reuse work done after being preempted
+* can reuse work that began but did not complete, after being preempted
 * can reuse work if shouldComponentUpdate is false, after being preempted
+* memoizes work even if shouldComponentUpdate returns false
 * can update in the middle of a tree using setState
 * can queue multiple state updates
 * can use updater form of setState
@@ -1156,7 +1173,10 @@ src/renderers/shared/fiber/__tests__/ReactIncremental-test.js
 * provides context when reusing work
 * reads context when setState is below the provider
 * reads context when setState is above the provider
-* maintains the correct context index when context proviers are bailed out due to low priority
+* maintains the correct context when providers bail out due to low priority
+* maintains the correct context when unwinding due to an error in render
+* should not recreate masked context unless inputs have changed
+* should reuse memoized work if pointers are updated before calling lifecycles
 
 src/renderers/shared/fiber/__tests__/ReactIncrementalErrorHandling-test.js
 * catches render error in a boundary during full deferred mounting
@@ -1183,6 +1203,12 @@ src/renderers/shared/fiber/__tests__/ReactIncrementalErrorHandling-test.js
 * recovers from uncaught reconciler errors
 * unmounts components with uncaught errors
 * does not interrupt unmounting if detaching a ref throws
+* handles error thrown by host config while working on failed root
+* handles error thrown by top-level callback
+* should log errors that occur during the begin phase
+* should log errors that occur during the commit phase
+* should ignore errors thrown in log method to prevent cycle
+* should relay info about error boundary and retry attempts if applicable
 
 src/renderers/shared/fiber/__tests__/ReactIncrementalReflection-test.js
 * handles isMounted even when the initial render is deferred
@@ -1190,31 +1216,19 @@ src/renderers/shared/fiber/__tests__/ReactIncrementalReflection-test.js
 * finds no node before insertion and correct node before deletion
 
 src/renderers/shared/fiber/__tests__/ReactIncrementalScheduling-test.js
-* schedules and flushes animation work
-* schedules and flushes animation work for many roots
-* flushes all scheduled animation work
-* flushes all scheduled animation work for many roots
 * schedules and flushes deferred work
-* schedules and flushes deferred work for many roots
-* flushes scheduled deferred work fitting within deadline
-* flushes scheduled deferred work fitting within deadline for many roots
-* schedules more deferred work if it runs out of time
-* schedules more deferred work if it runs out of time with many roots
-* flushes late animation work in a deferred callback if it wins
-* flushes late animation work in a deferred callback if it wins with many roots
-* flushes late animation work in an animation callback if it wins
-* flushes late animation work in an animation callback if it wins with many roots
-* flushes all work in a deferred callback if it wins
-* flushes all work in a deferred callback if it wins with many roots
-* flushes root with late deferred work in an animation callback if it wins
-* flushes all roots with animation work in an animation callback if it wins
-* splits deferred work on multiple roots
+* schedules and flushes animation work
+* searches for work on other roots once the current root completes
+* schedules an animation callback when there`s leftover animation work
+* schedules top-level updates in order of priority
+* schedules top-level updates with same priority in order of insertion
 * works on deferred roots in the order they were scheduled
-* handles interleaved deferred and animation work
 * schedules sync updates when inside componentDidMount/Update
 * can opt-in to deferred/animation scheduling inside componentDidMount/Update
 * performs Task work even after time runs out
 * does not perform animation work after time runs out
+* can opt-out of batching using unbatchedUpdates
+* nested updates are always deferred, even inside unbatchedUpdates
 
 src/renderers/shared/fiber/__tests__/ReactIncrementalSideEffects-test.js
 * can update child nodes of a host instance
@@ -1333,6 +1347,7 @@ src/renderers/shared/shared/__tests__/ReactChildReconciler-test.js
 * warns for duplicated iterable keys with component stack info
 
 src/renderers/shared/shared/__tests__/ReactComponent-test.js
+* should throw on invalid render targets
 * should throw when supplying a ref outside of render method
 * should warn when children are mutated during render
 * should warn when children are mutated during update
@@ -1343,6 +1358,7 @@ src/renderers/shared/shared/__tests__/ReactComponent-test.js
 * should call refs at the correct time
 * fires the callback after a component is rendered
 * throws usefully when rendering badly-typed elements
+* includes owner name in the error about badly-typed elements
 
 src/renderers/shared/shared/__tests__/ReactComponentLifeCycle-test.js
 * should not reuse an instance when it has been unmounted
@@ -1354,6 +1370,7 @@ src/renderers/shared/shared/__tests__/ReactComponentLifeCycle-test.js
 * should not throw when updating an auxiliary component
 * should allow state updates in componentDidMount
 * should call nested lifecycle methods in the right order
+* calls effects on module-pattern component
 
 src/renderers/shared/shared/__tests__/ReactCompositeComponent-test.js
 * should support module pattern components
@@ -1381,6 +1398,7 @@ src/renderers/shared/shared/__tests__/ReactCompositeComponent-test.js
 * should trigger componentWillReceiveProps for context changes
 * only renders once if updated in componentWillReceiveProps
 * only renders once if updated in componentWillReceiveProps when batching
+* should update refs if shouldComponentUpdate gives false
 * should allow access to findDOMNode in componentWillUnmount
 * context should be passed down from the parent
 * should replace state
@@ -1403,6 +1421,7 @@ src/renderers/shared/shared/__tests__/ReactCompositeComponentState-test.js
 * should call componentDidUpdate of children first
 * should batch unmounts
 * should update state when called from child cWRP
+* should merge state when sCU returns false
 
 src/renderers/shared/shared/__tests__/ReactEmptyComponent-test.js
 * should not produce child DOM nodes for null and false
@@ -1411,6 +1430,7 @@ src/renderers/shared/shared/__tests__/ReactEmptyComponent-test.js
 * should distinguish between a script placeholder and an actual script tag
 * should have findDOMNode return null when multiple layers of composite components render to the same null placeholder
 * works when switching components
+* can render null at the top level
 * does not break when updating during mount
 * preserves the dom node during updates
 
@@ -1422,6 +1442,8 @@ src/renderers/shared/shared/__tests__/ReactErrorBoundaries-test.js
 * renders an error state if child throws in render
 * renders an error state if child throws in constructor
 * renders an error state if child throws in componentWillMount
+* renders an error state if context provider throws in componentWillMount
+* renders an error state if module-style context provider throws in componentWillMount
 * mounts the error message if mounting fails
 * propagates errors on retry on mounting
 * propagates errors inside boundary during componentWillMount
@@ -1529,6 +1551,11 @@ src/renderers/shared/shared/__tests__/ReactStatelessComponent-test.js
 * should update stateless component
 * should unmount stateless component
 * should pass context thru stateless component
+* should throw when stateless component returns undefined
+* should throw on string refs in pure functions
+* should warn when given a string ref
+* should warn when given a function ref
+* deduplicates ref warnings based on element or owner
 * should provide a null ref
 * should use correct name in key warning
 * should support default props and prop types
@@ -1570,9 +1597,16 @@ src/renderers/shared/shared/__tests__/ReactUpdates-test.js
 * should queue updates from during mount
 * calls componentWillReceiveProps setState callback properly
 * does not call render after a component as been deleted
+* throws in setState if the update callback is not a function
+* throws in replaceState if the update callback is not a function
+* throws in forceUpdate if the update callback is not a function
 * does not update one component twice in a batch (#2410)
 * does not update one component twice in a batch (#6371)
 * unstable_batchedUpdates should return value from a callback
+* unmounts and remounts a root in the same batch
+* handles reentrant mounting in synchronous mode
+* mounts and unmounts are sync even in a batch
+* does not re-render if state update is null
 
 src/renderers/shared/shared/__tests__/refs-destruction-test.js
 * should remove refs when destroying the parent
@@ -1658,6 +1692,7 @@ src/renderers/testing/__tests__/ReactTestRenderer-test.js
 * renders a simple component
 * renders a top-level empty component
 * exposes a type flag
+* can render a composite component
 * renders some basics with an update
 * exposes the instance
 * updates types
@@ -1670,6 +1705,9 @@ src/renderers/testing/__tests__/ReactTestRenderer-test.js
 * supports unmounting inner instances
 * supports updates when using refs
 * supports error boundaries
+* can update text nodes
+* can update text nodes when rendered as root
+* can render and update root fragments
 
 src/shared/utils/__tests__/KeyEscapeUtils-test.js
 * should properly escape and wrap user defined keys

@@ -16,10 +16,14 @@ var ReactNoop;
 
 describe('ReactIncrementalSideEffects', () => {
   beforeEach(() => {
-    jest.resetModuleRegistry();
+    jest.resetModules();
     React = require('React');
     ReactNoop = require('ReactNoop');
   });
+
+  function normalizeCodeLocInfo(str) {
+    return str && str.replace(/\(at .+?:\d+\)/g, '(at **)');
+  }
 
   function div(...children) {
     children = children.map(c => typeof c === 'string' ? { text: c } : c);
@@ -663,7 +667,7 @@ describe('ReactIncrementalSideEffects', () => {
       ),
     ]);
 
-    expect(ops).toEqual(['Foo', 'Baz', 'Bar']);
+    expect(ops).toEqual(['Foo']);
     ops = [];
 
     ReactNoop.flush();
@@ -857,7 +861,7 @@ describe('ReactIncrementalSideEffects', () => {
       ),
     ]);
 
-    expect(ops).toEqual(['Bar', 'Bar']);
+    expect(ops).toEqual(['Bar']);
   });
   // TODO: Test that side-effects are not cut off when a work in progress node
   // moves to "current" without flushing due to having lower priority. Does this
@@ -1069,7 +1073,7 @@ describe('ReactIncrementalSideEffects', () => {
   });
 
   it('invokes ref callbacks after insertion/update/unmount', () => {
-
+    spyOn(console, 'error');
     var classInstance = null;
 
     var ops = [];
@@ -1129,6 +1133,14 @@ describe('ReactIncrementalSideEffects', () => {
       null,
     ]);
 
+    expectDev(normalizeCodeLocInfo(console.error.calls.argsFor(0)[0])).toBe(
+      'Warning: Stateless function components cannot be given refs. ' +
+      'Attempts to access this ref will fail. Check the render method ' +
+      'of `Foo`.\n' +
+      '    in FunctionalComponent (at **)\n' +
+      '    in div (at **)\n' +
+      '    in Foo (at **)'
+    );
   });
 
   // TODO: Test that mounts, updates, refs, unmounts and deletions happen in the

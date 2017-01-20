@@ -42,6 +42,8 @@ const TYPES = {
   TEXT: 'Text',
 };
 
+const UPDATE_SIGNAL = {};
+
 /** Helper Methods */
 
 function addEventListeners(instance, type, listener) {
@@ -328,9 +330,10 @@ class Surface extends Component {
 
     this._surface = Mode.Surface(+width, +height, this._tagRef);
 
-    this._mountNode = ARTRenderer.mountContainer(
+    this._mountNode = ARTRenderer.createContainer(this._surface);
+    ARTRenderer.updateContainer(
       this.props.children,
-      this._surface,
+      this._mountNode,
       this,
     );
   }
@@ -357,7 +360,11 @@ class Surface extends Component {
   }
 
   componentWillUnmount() {
-    ARTRenderer.unmountContainer(this._mountNode);
+    ARTRenderer.updateContainer(
+      null,
+      this._mountNode,
+      this,
+    );
   }
 
   render() {
@@ -409,7 +416,11 @@ const ARTRenderer = ReactFiberReconciler({
     // Noop
   },
 
-  commitUpdate(instance, type, oldProps, newProps) {
+  commitMount(instance, type, newProps) {
+    // Noop
+  },
+
+  commitUpdate(instance, updatePayload, type, oldProps, newProps) {
     instance._applyProps(instance, newProps, oldProps);
   },
 
@@ -452,7 +463,11 @@ const ARTRenderer = ReactFiberReconciler({
   },
 
   finalizeInitialChildren(domElement, type, props) {
-    // Noop
+    return false;
+  },
+
+  getPublicInstance(instance) {
+    return instance;
   },
 
   insertBefore(parentInstance, child, beforeChild) {
@@ -469,7 +484,7 @@ const ARTRenderer = ReactFiberReconciler({
   },
 
   prepareUpdate(domElement, type, oldProps, newProps) {
-    return true;
+    return UPDATE_SIGNAL;
   },
 
   removeChild(parentInstance, child) {

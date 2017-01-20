@@ -25,6 +25,7 @@ const {
   TaskPriority,
 } = require('ReactPriorityLevel');
 
+const validateCallback = require('validateCallback');
 const warning = require('warning');
 
 type PartialState<State, Props> =
@@ -39,6 +40,7 @@ type Update = {
   callback: Callback | null,
   isReplace: boolean,
   isForced: boolean,
+  isTopLevelUnmount: boolean,
   next: Update | null,
 };
 
@@ -57,6 +59,7 @@ export type UpdateQueue = {
   first: Update | null,
   last: Update | null,
   hasForceUpdate: boolean,
+  callbackList: null | Array<Callback>,
 
   // Dev only
   isProcessing?: boolean,
@@ -79,15 +82,6 @@ function comparePriority(a : PriorityLevel, b : PriorityLevel) : number {
   return a - b;
 }
 
-function hasPendingUpdate(queue : UpdateQueue, priorityLevel : PriorityLevel) : boolean {
-  if (!queue.first) {
-    return false;
-  }
-  // Return true if the first pending update has greater or equal priority.
-  return comparePriority(queue.first.priorityLevel, priorityLevel) <= 0;
-}
-exports.hasPendingUpdate = hasPendingUpdate;
-
 // Ensures that a fiber has an update queue, creating a new one if needed.
 // Returns the new or existing queue.
 function ensureUpdateQueue(fiber : Fiber) : UpdateQueue {
@@ -102,6 +96,7 @@ function ensureUpdateQueue(fiber : Fiber) : UpdateQueue {
       first: null,
       last: null,
       hasForceUpdate: false,
+      callbackList: null,
       isProcessing: false,
     };
   } else {
@@ -109,6 +104,7 @@ function ensureUpdateQueue(fiber : Fiber) : UpdateQueue {
       first: null,
       last: null,
       hasForceUpdate: false,
+      callbackList: null,
     };
   }
 
@@ -117,19 +113,25 @@ function ensureUpdateQueue(fiber : Fiber) : UpdateQueue {
 }
 
 // Clones an update queue from a source fiber onto its alternate.
-function cloneUpdateQueue(alt : Fiber, fiber : Fiber) : UpdateQueue | null {
-  const sourceQueue = fiber.updateQueue;
-  if (!sourceQueue) {
+function cloneUpdateQueue(current : Fiber, workInProgress : Fiber) : UpdateQueue | null {
+  const currentQueue = current.updateQueue;
+  if (!currentQueue) {
     // The source fiber does not have an update queue.
-    alt.updateQueue = null;
+    workInProgress.updateQueue = null;
     return null;
   }
   // If the alternate already has a queue, reuse the previous object.
-  const altQueue = alt.updateQueue || {};
-  altQueue.first = sourceQueue.first;
-  altQueue.last = sourceQueue.last;
-  altQueue.hasForceUpdate = sourceQueue.hasForceUpdate;
-  alt.updateQueue = altQueue;
+  const altQueue = workInProgress.updateQueue || {};
+  altQueue.first = currentQueue.first;
+  altQueue.last = currentQueue.last;
+
+  // These fields are invalid by the time we clone from current. Reset them.
+  altQueue.hasForceUpdate = false;
+  altQueue.callbackList = null;
+  altQueue.isProcessing = false;
+
+  workInProgress.updateQueue = altQueue;
+
   return altQueue;
 }
 exports.cloneUpdateQueue = cloneUpdateQueue;
@@ -141,6 +143,7 @@ function cloneUpdate(update : Update) : Update {
     callback: update.callback,
     isReplace: update.isReplace,
     isForced: update.isForced,
+    isTopLevelUnmount: update.isTopLevelUnmount,
     next: null,
   };
 }
@@ -209,12 +212,16 @@ function findInsertionPosition(queue, update) : Update | null {
 //
 // However, if incoming update is inserted into the same position of both lists,
 // we shouldn't make a copy.
-function insertUpdate(fiber : Fiber, update : Update, methodName : ?string) : void {
+//
+// If the update is cloned, it returns the cloned update.
+function insertUpdate(fiber : Fiber, update : Update, methodName : string) : Update | null {
+  validateCallback(update.callback, methodName);
+
   const queue1 = ensureUpdateQueue(fiber);
   const queue2 = fiber.alternate ? ensureUpdateQueue(fiber.alternate) : null;
 
   // Warn if an update is scheduled from inside an updater function.
-  if (__DEV__ && typeof methodName === 'string') {
+  if (__DEV__) {
     if (queue1.isProcessing || (queue2 && queue2.isProcessing)) {
       if (methodName === 'setState') {
         warning(
@@ -244,7 +251,7 @@ function insertUpdate(fiber : Fiber, update : Update, methodName : ?string) : vo
   if (!queue2) {
     // If there's no alternate queue, there's nothing else to do but insert.
     insertUpdateIntoQueue(queue1, update, insertAfter1, insertBefore1);
-    return;
+    return null;
   }
 
   // If there is an alternate queue, find the insertion position.
@@ -260,6 +267,7 @@ function insertUpdate(fiber : Fiber, update : Update, methodName : ?string) : vo
     // insert the clone into the alternate queue.
     const update2 = cloneUpdate(update);
     insertUpdateIntoQueue(queue2, update2, insertAfter2, insertBefore2);
+    return update2;
   } else {
     // The insertion positions are the same, so when we inserted into the first
     // queue, it also inserted into the alternate. All we need to do is update
@@ -272,86 +280,110 @@ function insertUpdate(fiber : Fiber, update : Update, methodName : ?string) : vo
       queue2.last = null;
     }
   }
+
+  return null;
 }
 
 function addUpdate(
   fiber : Fiber,
   partialState : PartialState<any, any> | null,
+  callback : Callback | null,
   priorityLevel : PriorityLevel
 ) : void {
   const update = {
     priorityLevel,
     partialState,
-    callback: null,
+    callback,
     isReplace: false,
     isForced: false,
+    isTopLevelUnmount: false,
     next: null,
   };
-  if (__DEV__) {
-    insertUpdate(fiber, update, 'setState');
-  } else {
-    insertUpdate(fiber, update);
-  }
+  insertUpdate(fiber, update, 'setState');
 }
 exports.addUpdate = addUpdate;
 
 function addReplaceUpdate(
   fiber : Fiber,
   state : any | null,
+  callback : Callback | null,
   priorityLevel : PriorityLevel
 ) : void {
   const update = {
     priorityLevel,
     partialState: state,
-    callback: null,
+    callback,
     isReplace: true,
     isForced: false,
+    isTopLevelUnmount: false,
     next: null,
   };
-
-  if (__DEV__) {
-    insertUpdate(fiber, update, 'replaceState');
-  } else {
-    insertUpdate(fiber, update);
-  }
+  insertUpdate(fiber, update, 'replaceState');
 }
 exports.addReplaceUpdate = addReplaceUpdate;
 
-function addForceUpdate(fiber : Fiber, priorityLevel : PriorityLevel) : void {
+function addForceUpdate(
+  fiber : Fiber,
+  callback : Callback | null,
+  priorityLevel : PriorityLevel
+) : void {
   const update = {
-    priorityLevel,
-    partialState: null,
-    callback: null,
-    isReplace: false,
-    isForced: true,
-    next: null,
-  };
-  if (__DEV__) {
-    insertUpdate(fiber, update, 'forceUpdate');
-  } else {
-    insertUpdate(fiber, update);
-  }
-}
-exports.addForceUpdate = addForceUpdate;
-
-
-function addCallback(fiber : Fiber, callback: Callback, priorityLevel : PriorityLevel) : void {
-  const update : Update = {
     priorityLevel,
     partialState: null,
     callback,
     isReplace: false,
-    isForced: false,
+    isForced: true,
+    isTopLevelUnmount: false,
     next: null,
   };
-  insertUpdate(fiber, update);
+  insertUpdate(fiber, update, 'forceUpdate');
 }
-exports.addCallback = addCallback;
+exports.addForceUpdate = addForceUpdate;
 
 function getPendingPriority(queue : UpdateQueue) : PriorityLevel {
   return queue.first ? queue.first.priorityLevel : NoWork;
 }
 exports.getPendingPriority = getPendingPriority;
+
+function addTopLevelUpdate(
+  fiber : Fiber,
+  partialState : PartialState<any, any>,
+  callback : Callback | null,
+  priorityLevel : PriorityLevel
+) : void {
+  const isTopLevelUnmount = Boolean(
+    partialState &&
+    partialState.element === null
+  );
+
+  const update = {
+    priorityLevel,
+    partialState,
+    callback,
+    isReplace: false,
+    isForced: false,
+    isTopLevelUnmount,
+    next: null,
+  };
+  const update2 = insertUpdate(fiber, update, 'render');
+
+  if (isTopLevelUnmount) {
+    // Drop all updates that are lower-priority, so that the tree is not
+    // remounted. We need to do this for both queues.
+    const queue1 = fiber.updateQueue;
+    const queue2 = fiber.alternate && fiber.alternate.updateQueue;
+
+    if (queue1 && update.next) {
+      update.next = null;
+      queue1.last = update;
+    }
+    if (queue2 && update2 && update2.next) {
+      update2.next = null;
+      queue2.last = update;
+    }
+  }
+}
+exports.addTopLevelUpdate = addTopLevelUpdate;
 
 function getStateFromUpdate(update, instance, prevState, props) {
   const partialState = update.partialState;
@@ -412,29 +444,22 @@ function beginUpdateQueue(
     if (update.isForced) {
       queue.hasForceUpdate = true;
     }
-    if (update.callback) {
-      if (callbackList && callbackList.last) {
-        callbackList.last.next = update;
-        callbackList.last = update;
-      } else {
-        const callbackUpdate = cloneUpdate(update);
-        callbackList = {
-          first: callbackUpdate,
-          last: callbackUpdate,
-          hasForceUpdate: false,
-        };
-      }
+    // Second condition ignores top-level unmount callbacks if they are not the
+    // last update in the queue, since a subsequent update will cause a remount.
+    if (update.callback && !(update.isTopLevelUnmount && update.next)) {
+      callbackList = callbackList || [];
+      callbackList.push(update.callback);
       workInProgress.effectTag |= CallbackEffect;
     }
     update = update.next;
   }
 
-  if (!queue.first && !queue.hasForceUpdate) {
-    // Queue is now empty
+  queue.callbackList = callbackList;
+
+  if (!queue.first && !callbackList && !queue.hasForceUpdate) {
+    // The queue is empty and there are no callbacks. We can reset it.
     workInProgress.updateQueue = null;
   }
-
-  workInProgress.callbackList = callbackList;
 
   if (__DEV__) {
     queue.isProcessing = false;
@@ -444,19 +469,14 @@ function beginUpdateQueue(
 }
 exports.beginUpdateQueue = beginUpdateQueue;
 
-function commitCallbacks(finishedWork : Fiber, callbackList : UpdateQueue, context : mixed) {
-  const stopAfter = callbackList.last;
-  let update = callbackList.first;
-  while (update) {
-    const callback = update.callback;
-    if (typeof callback === 'function') {
-      callback.call(context);
-    }
-    if (update === stopAfter) {
-      break;
-    }
-    update = update.next;
+function commitCallbacks(finishedWork : Fiber, queue : UpdateQueue, context : mixed) {
+  const callbackList = queue.callbackList;
+  if (!callbackList) {
+    return;
   }
-  finishedWork.callbackList = null;
+  for (let i = 0; i < callbackList.length; i++) {
+    const callback = callbackList[i];
+    callback.call(context);
+  }
 }
 exports.commitCallbacks = commitCallbacks;

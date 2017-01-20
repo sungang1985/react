@@ -13,9 +13,9 @@
 
 var React;
 var ReactDOM;
-var ReactDOMFeatureFlags;
 var ReactTestUtils;
 var ReactUpdates;
+var ReactDOMFeatureFlags = require('ReactDOMFeatureFlags');
 
 describe('ReactUpdates', () => {
   beforeEach(() => {
@@ -648,16 +648,18 @@ describe('ReactUpdates', () => {
           'Inner-render-1-0',
           'Inner-didUpdate-1-0',
         'Outer-didUpdate-1',
+           // Happens in a batch, so don't re-render yet
           'Inner-setState-1',
-            'Inner-render-1-1',
-            'Inner-didUpdate-1-1',
-            'Inner-callback-1',
         'Outer-callback-1',
 
-      'Outer-setState-2',
+        // Happens in a batch
+        'Outer-setState-2',
+
+        // Flush batched updates all at once
         'Outer-render-2',
           'Inner-render-2-1',
           'Inner-didUpdate-2-1',
+          'Inner-callback-1',
         'Outer-didUpdate-2',
           'Inner-setState-2',
         'Outer-callback-2',
@@ -1102,5 +1104,72 @@ describe('ReactUpdates', () => {
       ReactDOM.render(<span>b</span>, container);
     });
     expect(container.textContent).toBe('b');
+  });
+
+  it('handles reentrant mounting in synchronous mode', () => {
+    var mounts = 0;
+    class Editor extends React.Component {
+      render() {
+        return <div>{this.props.text}</div>;
+      }
+      componentDidMount() {
+        mounts++;
+        // This should be called only once but we guard just in case.
+        if (!this.props.rendered) {
+          this.props.onChange({rendered: true});
+        }
+      }
+    }
+
+    var container = document.createElement('div');
+    function render() {
+      ReactDOM.render(
+        <Editor
+          onChange={(newProps) => {
+            props = {...props, ...newProps};
+            render();
+          }}
+          {...props}
+        />,
+        container
+      );
+    }
+
+    var props = {text: 'hello', rendered: false};
+    render();
+    props = {...props, text: 'goodbye'};
+    render();
+    expect(container.textContent).toBe('goodbye');
+    expect(mounts).toBe(1);
+  });
+
+  it('mounts and unmounts are sync even in a batch', done => {
+    var container = document.createElement('div');
+    ReactDOM.unstable_batchedUpdates(() => {
+      ReactDOM.render(<div>Hello</div>, container);
+      expect(container.textContent).toEqual('Hello');
+      ReactDOM.unmountComponentAtNode(container);
+      expect(container.textContent).toEqual('');
+      done();
+    });
+  });
+
+  it('does not re-render if state update is null', () => {
+    let container = document.createElement('div');
+
+    let instance;
+    let ops = [];
+    class Foo extends React.Component {
+      render() {
+        instance = this;
+        ops.push('render');
+        return <div />;
+      }
+    }
+    ReactDOM.render(<Foo />, container);
+
+    ops = [];
+    instance.setState(() => null);
+    expect(ops).toEqual([]);
   });
 });

@@ -21,7 +21,6 @@ import type { ReifiedYield } from 'ReactReifiedYield';
 
 var { reconcileChildFibers } = require('ReactChildFiber');
 var {
-  isContextProvider,
   popContextProvider,
 } = require('ReactFiberContext');
 var ReactTypeOfWork = require('ReactTypeOfWork');
@@ -40,6 +39,7 @@ var {
   Fragment,
 } = ReactTypeOfWork;
 var {
+  Ref,
   Update,
 } = ReactTypeOfSideEffect;
 
@@ -47,8 +47,8 @@ if (__DEV__) {
   var ReactDebugCurrentFiber = require('ReactDebugCurrentFiber');
 }
 
-module.exports = function<T, P, I, TI, C, CX>(
-  config : HostConfig<T, P, I, TI, C, CX>,
+module.exports = function<T, P, I, TI, PI, C, CX, PL>(
+  config : HostConfig<T, P, I, TI, PI, C, CX, PL>,
   hostContext : HostContext<C, CX>,
 ) {
   const {
@@ -101,7 +101,7 @@ module.exports = function<T, P, I, TI, C, CX>(
   }
 
   function moveCoroutineToHandlerPhase(current : ?Fiber, workInProgress : Fiber) {
-    var coroutine = (workInProgress.pendingProps : ?ReactCoroutine);
+    var coroutine = (workInProgress.memoizedProps : ?ReactCoroutine);
     if (!coroutine) {
       throw new Error('Should be resolved by now');
     }
@@ -171,25 +171,14 @@ module.exports = function<T, P, I, TI, C, CX>(
 
     switch (workInProgress.tag) {
       case FunctionalComponent:
-        workInProgress.memoizedProps = workInProgress.pendingProps;
         return null;
       case ClassComponent: {
         // We are leaving this subtree, so pop context if any.
-        if (isContextProvider(workInProgress)) {
-          popContextProvider();
-        }
-        // Don't use the state queue to compute the memoized state. We already
-        // merged it and assigned it to the instance. Transfer it from there.
-        // Also need to transfer the props, because pendingProps will be null
-        // in the case of an update.
-        const instance = workInProgress.stateNode;
-        workInProgress.memoizedState = instance.state;
-        workInProgress.memoizedProps = instance.props;
-
+        popContextProvider(workInProgress);
         return null;
       }
       case HostRoot: {
-        workInProgress.memoizedProps = workInProgress.pendingProps;
+        // TODO: Pop the host container after #8607 lands.
         const fiberRoot = (workInProgress.stateNode : FiberRoot);
         if (fiberRoot.pendingContext) {
           fiberRoot.context = fiberRoot.pendingContext;
@@ -197,10 +186,11 @@ module.exports = function<T, P, I, TI, C, CX>(
         }
         return null;
       }
-      case HostComponent:
+      case HostComponent: {
         popHostContext(workInProgress);
+        const rootContainerInstance = getRootHostContainer();
         const type = workInProgress.type;
-        let newProps = workInProgress.pendingProps;
+        const newProps = workInProgress.memoizedProps;
         if (current && workInProgress.stateNode != null) {
           // If we have an alternate, that means this is an update and we need to
           // schedule a side-effect to do the updates.
@@ -209,13 +199,14 @@ module.exports = function<T, P, I, TI, C, CX>(
           // have newProps so we'll have to reuse them.
           // TODO: Split the update API as separate for the props vs. children.
           // Even better would be if children weren't special cased at all tho.
-          if (!newProps) {
-            newProps = workInProgress.memoizedProps || oldProps;
-          }
           const instance : I = workInProgress.stateNode;
           const currentHostContext = getHostContext();
-          if (prepareUpdate(instance, type, oldProps, newProps, currentHostContext)) {
-            // This returns true if there was something to update.
+          const updatePayload = prepareUpdate(instance, type, oldProps, newProps, rootContainerInstance, currentHostContext);
+          // TODO: Type this specific to this type of component.
+          workInProgress.updateQueue = (updatePayload : any);
+          // If the update payload indicates that there is a change or if there
+          // is a new ref we mark this as an update.
+          if (updatePayload || current.ref !== workInProgress.ref) {
             markUpdate(workInProgress);
           }
         } else {
@@ -228,7 +219,6 @@ module.exports = function<T, P, I, TI, C, CX>(
             }
           }
 
-          const rootContainerInstance = getRootHostContainer();
           const currentHostContext = getHostContext();
           // TODO: Move createInstance to beginWork and keep it on a context
           // "stack" as the parent. Then append children as we go in beginWork
@@ -241,29 +231,28 @@ module.exports = function<T, P, I, TI, C, CX>(
             currentHostContext,
             workInProgress
           );
+
           appendAllChildren(instance, workInProgress);
-          finalizeInitialChildren(instance, type, newProps, rootContainerInstance);
+
+          // Certain renderers require commit-time effects for initial mount.
+          // (eg DOM renderer supports auto-focus for certain elements).
+          // Make sure such renderers get scheduled for later work.
+          if (finalizeInitialChildren(instance, type, newProps, rootContainerInstance)) {
+            markUpdate(workInProgress);
+          }
 
           workInProgress.stateNode = instance;
           if (workInProgress.ref) {
             // If there is a ref on a host node we need to schedule a callback
-            markUpdate(workInProgress);
+            workInProgress.effectTag |= Ref;
           }
         }
-        workInProgress.memoizedProps = newProps;
         return null;
-      case HostText:
-        let newText = workInProgress.pendingProps;
+      }
+      case HostText: {
+        let newText = workInProgress.memoizedProps;
         if (current && workInProgress.stateNode != null) {
           const oldText = current.memoizedProps;
-          if (newText === null) {
-            // If this was a bail out we need to fall back to memoized text.
-            // This works the same way as HostComponent.
-            newText = workInProgress.memoizedProps;
-            if (newText === null) {
-              newText = oldText;
-            }
-          }
           // If we have an alternate, that means this is an update and we need
           // to schedule a side-effect to do the updates.
           if (oldText !== newText) {
@@ -283,12 +272,11 @@ module.exports = function<T, P, I, TI, C, CX>(
           const textInstance = createTextInstance(newText, rootContainerInstance, currentHostContext, workInProgress);
           workInProgress.stateNode = textInstance;
         }
-        workInProgress.memoizedProps = newText;
         return null;
+      }
       case CoroutineComponent:
         return moveCoroutineToHandlerPhase(current, workInProgress);
       case CoroutineHandlerPhase:
-        workInProgress.memoizedProps = workInProgress.pendingProps;
         // Reset the tag to now be a first phase coroutine.
         workInProgress.tag = CoroutineComponent;
         return null;
@@ -296,13 +284,11 @@ module.exports = function<T, P, I, TI, C, CX>(
         // Does nothing.
         return null;
       case Fragment:
-        workInProgress.memoizedProps = workInProgress.pendingProps;
         return null;
       case HostPortal:
         // TODO: Only mark this as an update if we have any pending callbacks.
         markUpdate(workInProgress);
-        workInProgress.memoizedProps = workInProgress.pendingProps;
-        popHostContainer();
+        popHostContainer(workInProgress);
         return null;
 
       // Error cases

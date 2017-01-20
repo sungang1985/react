@@ -24,7 +24,7 @@ var ReactTestUtils;
 describe('ReactCompositeComponent', () => {
 
   beforeEach(() => {
-    jest.resetModuleRegistry();
+    jest.resetModules();
     React = require('React');
     ReactDOM = require('ReactDOM');
     ReactDOMFeatureFlags = require('ReactDOMFeatureFlags');
@@ -1266,7 +1266,7 @@ describe('ReactCompositeComponent', () => {
     var layer = document.createElement('div');
 
     class Component extends React.Component {
-      componentWillMount() {
+      componentDidMount() {
         ReactDOM.render(<div />, layer);
       }
 

@@ -29,6 +29,8 @@ var {
 } = require('ReactPriorityLevel');
 var emptyObject = require('emptyObject');
 
+const UPDATE_SIGNAL = {};
+
 var scheduledAnimationCallback = null;
 var scheduledDeferredCallback = null;
 
@@ -39,14 +41,23 @@ type TextInstance = {| text: string, id: number |};
 
 var instanceCounter = 0;
 
+var failInBeginPhase = false;
+
 var NoopRenderer = ReactFiberReconciler({
 
   getRootHostContext() {
+    if (failInBeginPhase) {
+      throw new Error('Error in host config.');
+    }
     return emptyObject;
   },
 
   getChildHostContext() {
     return emptyObject;
+  },
+
+  getPublicInstance(instance) {
+    return instance;
   },
 
   createInstance(type : string, props : Props) : Instance {
@@ -65,15 +76,19 @@ var NoopRenderer = ReactFiberReconciler({
     parentInstance.children.push(child);
   },
 
-  finalizeInitialChildren(domElement : Instance, type : string, props : Props) : void {
+  finalizeInitialChildren(domElement : Instance, type : string, props : Props) : boolean {
+    return false;
+  },
+
+  prepareUpdate(instance : Instance, type : string, oldProps : Props, newProps : Props) : null | {} {
+    return UPDATE_SIGNAL;
+  },
+
+  commitMount(instance : Instance, type : string, newProps : Props) : void {
     // Noop
   },
 
-  prepareUpdate(instance : Instance, type : string, oldProps : Props, newProps : Props) : boolean {
-    return true;
-  },
-
-  commitUpdate(instance : Instance, type : string, oldProps : Props, newProps : Props) : void {
+  commitUpdate(instance : Instance, updatePayload : Object, type : string, oldProps : Props, newProps : Props) : void {
     instance.prop = newProps.prop;
   },
 
@@ -183,25 +198,23 @@ var ReactNoop = {
   },
 
   renderToRootWithID(element : ReactElement<any>, rootID : string, callback : ?Function) {
-    if (!roots.has(rootID)) {
+    let root = roots.get(rootID);
+    if (!root) {
       const container = { rootID: rootID, children: [] };
       rootContainers.set(rootID, container);
-      const root = NoopRenderer.mountContainer(element, container, null, callback);
+      root = NoopRenderer.createContainer(container);
       roots.set(rootID, root);
-    } else {
-      const root = roots.get(rootID);
-      if (root) {
-        NoopRenderer.updateContainer(element, root, null, callback);
-      }
     }
+    NoopRenderer.updateContainer(element, root, null, callback);
   },
 
   unmountRootWithID(rootID : string) {
     const root = roots.get(rootID);
-    roots.delete(rootID);
-    rootContainers.delete(rootID);
     if (root) {
-      NoopRenderer.unmountContainer(root);
+      NoopRenderer.updateContainer(null, root, null, () => {
+        roots.delete(rootID);
+        rootContainers.delete(rootID);
+      });
     }
   },
 
@@ -257,6 +270,8 @@ var ReactNoop = {
 
   batchedUpdates: NoopRenderer.batchedUpdates,
 
+  unbatchedUpdates: NoopRenderer.unbatchedUpdates,
+
   syncUpdates: NoopRenderer.syncUpdates,
 
   // Logs the current state of the tree.
@@ -304,14 +319,16 @@ var ReactNoop = {
       log(
         '  '.repeat(depth + 1) + '~',
         firstUpdate && firstUpdate.partialState,
-        firstUpdate.callback ? 'with callback' : ''
+        firstUpdate.callback ? 'with callback' : '',
+        '[' + firstUpdate.priorityLevel + ']'
       );
       var next;
       while (next = firstUpdate.next) {
         log(
           '  '.repeat(depth + 1) + '~',
           next.partialState,
-          next.callback ? 'with callback' : ''
+          next.callback ? 'with callback' : '',
+          '[' + firstUpdate.priorityLevel + ']'
         );
       }
     }
@@ -348,6 +365,15 @@ var ReactNoop = {
     logFiber((root.stateNode : any).current, 0);
 
     console.log(...bufferedLog);
+  },
+
+  simulateErrorInHostConfig(fn : () => void) {
+    failInBeginPhase = true;
+    try {
+      fn();
+    } finally {
+      failInBeginPhase = false;
+    }
   },
 
 };

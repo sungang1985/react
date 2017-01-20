@@ -25,10 +25,9 @@ function getCurrentFiberOwnerName() : string | null {
     if (fiber == null) {
       return null;
     }
-    if (fiber._debugOwner == null) {
-      return null;
+    if (fiber._debugOwner != null) {
+      return getComponentName(fiber._debugOwner);
     }
-    return getComponentName(fiber._debugOwner);
   }
   return null;
 }

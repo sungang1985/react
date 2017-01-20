@@ -33,7 +33,11 @@ const emptyObject = require('emptyObject');
 const findNodeHandle = require('findNodeHandle');
 const invariant = require('invariant');
 
-const { precacheFiberNode, uncacheFiberNode } = ReactNativeComponentTree;
+const {
+  precacheFiberNode,
+  uncacheFiberNode,
+  updateFiberEventHandlers,
+} = ReactNativeComponentTree;
 
 ReactNativeInjection.inject();
 
@@ -110,17 +114,26 @@ const NativeRenderer = ReactFiberReconciler({
     );
   },
 
+  commitMount(
+    instance : Instance,
+    type : string,
+    newProps : Props,
+    internalInstanceHandle : Object
+  ) : void {
+    // Noop
+  },
+
   commitUpdate(
     instance : Instance,
+    updatePayloadTODO : Object,
     type : string,
     oldProps : Props,
     newProps : Props,
-    rootContainerInstance : Object,
     internalInstanceHandle : Object
   ) : void {
     const viewConfig = instance.viewConfig;
 
-    precacheFiberNode(internalInstanceHandle, instance._nativeTag);
+    updateFiberEventHandlers(instance._nativeTag, newProps);
 
     const updatePayload = ReactNativeAttributePayload.diff(
       oldProps,
@@ -139,7 +152,7 @@ const NativeRenderer = ReactFiberReconciler({
     type : string,
     props : Props,
     rootContainerInstance : Container,
-    hostContext : Object,
+    hostContext : {||},
     internalInstanceHandle : Object
   ) : Instance {
     const tag = ReactNativeTagHandles.allocateTag();
@@ -168,6 +181,7 @@ const NativeRenderer = ReactFiberReconciler({
     const component = new NativeHostComponent(tag, viewConfig);
 
     precacheFiberNode(internalInstanceHandle, tag);
+    updateFiberEventHandlers(tag, props);
 
     return component;
   },
@@ -175,7 +189,7 @@ const NativeRenderer = ReactFiberReconciler({
   createTextInstance(
     text : string,
     rootContainerInstance : Container,
-    hostContext : Object,
+    hostContext : {||},
     internalInstanceHandle : Object,
   ) : TextInstance {
     const tag = ReactNativeTagHandles.allocateTag();
@@ -197,7 +211,7 @@ const NativeRenderer = ReactFiberReconciler({
     type : string,
     props : Props,
     rootContainerInstance : Container,
-  ) : void {
+  ) : boolean {
     // Map from child objects to native tags.
     // Either way we need to pass a copy of the Array to prevent it from being frozen.
     const nativeTags = parentInstance._children.map(
@@ -210,14 +224,20 @@ const NativeRenderer = ReactFiberReconciler({
       parentInstance._nativeTag, // containerTag
       nativeTags // reactTags
     );
+
+    return false;
   },
 
-  getRootHostContext() {
+  getRootHostContext() : {||} {
     return emptyObject;
   },
 
-  getChildHostContext() {
+  getChildHostContext() : {||} {
     return emptyObject;
+  },
+
+  getPublicInstance(instance) {
+    return instance;
   },
 
   insertBefore(
@@ -274,9 +294,11 @@ const NativeRenderer = ReactFiberReconciler({
     instance : Instance,
     type : string,
     oldProps : Props,
-    newProps : Props
-  ) : boolean {
-    return true;
+    newProps : Props,
+    rootContainerInstance : Container,
+    hostContext : {||}
+  ) : null | Object {
+    return emptyObject;
   },
 
   removeChild(
@@ -329,7 +351,7 @@ const NativeRenderer = ReactFiberReconciler({
     // But creates an additional child Fiber for raw text children.
     // No additional native views are created though.
     // It's not clear to me which is better so I'm deferring for now.
-    // More context @ github.com/facebook/react/pull/8560#discussion_r92111303 
+    // More context @ github.com/facebook/react/pull/8560#discussion_r92111303
     return false;
   },
 
@@ -361,12 +383,10 @@ const ReactNative = {
     if (!root) {
       // TODO (bvaughn): If we decide to keep the wrapper component,
       // We could create a wrapper for containerTag as well to reduce special casing.
-      root = NativeRenderer.mountContainer(element, containerTag, null, callback);
-
+      root = NativeRenderer.createContainer(containerTag);
       roots.set(containerTag, root);
-    } else {
-      NativeRenderer.updateContainer(element, root, null, callback);
     }
+    NativeRenderer.updateContainer(element, root, null, callback);
 
     return NativeRenderer.getPublicRootInstance(root);
   },
@@ -375,8 +395,9 @@ const ReactNative = {
     const root = roots.get(containerTag);
     if (root) {
       // TODO: Is it safe to reset this now or should I wait since this unmount could be deferred?
-      roots.delete(containerTag);
-      NativeRenderer.unmountContainer(root);
+      NativeRenderer.updateContainer(null, root, null, () => {
+        roots.delete(containerTag);
+      });
     }
   },
 
